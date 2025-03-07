@@ -1464,6 +1464,45 @@ namespace ERPAPI.Controllers
             return Ok(finalizedProcessCounts);
         }
 
+        [HttpGet("StatusDetails")]
+        public async Task<ActionResult> GetDetailsforProcess(int projectId, string LotNo, int ProcessIDFilter, int StatustoFind)
+        {
+            var qsitems = await _context.QuantitySheets
+                .Where(qs => qs.ProjectId == projectId && qs.LotNo == LotNo)
+                .ToListAsync();
+            // Filter in memory for matching ProcessId
+            qsitems = qsitems
+                .Where(qs => qs.ProcessId.Contains(ProcessIDFilter))
+                .ToList();
+            var transactions = await _context.Transaction
+                .Where(t => t.ProjectId == projectId && t.LotNo == Int32.Parse(LotNo) && t.ProcessId == ProcessIDFilter)
+                .ToListAsync(); 
+            // Left join QuantitySheets with Transactions
+            var joinedResults = from qs in qsitems
+                                join t in transactions
+                                on qs.QuantitySheetId equals t.QuantitysheetId into gj
+                                from subT in gj.DefaultIfEmpty() // Left join
+                                where (StatustoFind == 0
+                                       ? subT == null || subT.Status == 0  // No entry in Transaction OR Status == 0
+                                       : subT != null && subT.Status == StatustoFind) // For other statuses
+                                select new
+                                {
+                                    QuantitySheetId = qs.QuantitySheetId,
+                                    CatchNo = qs.CatchNo,
+                                    Paper = qs.Paper,
+                                    ExamDate = qs.ExamDate,
+                                    ExamTime = qs.ExamTime,
+                                    Course = qs.Course,
+                                    Subject = qs.Subject,
+                                    Quantity = qs.Quantity,
+                                    Status = subT?.Status ?? 0 // If null (no transaction), assume Status = 0
+                                };
+            var resultList = joinedResults.ToList();
+            return Ok(resultList);
+        }
+
+
+
 
 
 
