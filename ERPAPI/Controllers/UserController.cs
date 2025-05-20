@@ -166,7 +166,7 @@ namespace ERPAPI.Controllers
         }
 
 
-        [HttpGet("LoggedUser")]
+        /*[HttpGet("LoggedUser")]
         [Authorize] // Ensures the request is authenticated
         public async Task<ActionResult<User>> GetUserByJwt()
         {
@@ -197,6 +197,73 @@ namespace ERPAPI.Controllers
                             user.Gender,
                             user.Address,
                             user.ProfilePicturePath,
+                            Role = new
+                            {
+                                role.RoleId,
+                                role.RoleName,
+                                role.PriorityOrder,
+                                role.Status,
+                                Permissions = role.PermissionList // Use PermissionList for deserialized permissions
+                            }
+                        }
+                    )
+                    .FirstOrDefaultAsync();
+
+                if (user == null)
+                {
+                    return NotFound("User not found.");
+                }
+
+                return Ok(user); // Return the retrieved user information
+            }
+            catch (Exception ex)
+            {
+                _loggerService.LogError("Failed to retrieve user by JWT", ex.Message, "UserController");
+                return StatusCode(500, "Failed to retrieve user");
+            }
+        }
+*/
+
+
+
+        [HttpGet("LoggedUser")]
+        [Authorize] // Ensures the request is authenticated
+        public async Task<ActionResult<User>> GetUserByJwt()
+        {
+            try
+            {
+                var userIdClaim = HttpContext.User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name);
+                if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    return BadRequest("Invalid token");
+                }
+                var displayIds = await _context.UserDisplays
+                                          .Where(u => u.UserId == userId)
+                                          .Select(u => u.DisplayId)
+                                          .ToListAsync();
+
+                // Retrieve the user from the database
+                var user = await _context.Users
+                    .Where(u => u.UserId == userId)
+                    .Join(
+                        _context.Roles,
+                        user => user.RoleId,
+                        role => role.RoleId,
+                        (user, role) => new
+                        {
+                            user.UserId,
+                            user.UserName,
+                            user.FirstName,
+                            user.MiddleName,
+                            user.LastName,
+                            user.MobileNo,
+                            user.Status,
+                            user.Gender,
+                            user.Address,
+                            user.ProfilePicturePath,
+                            displayIds,
+                        
+                           
                             Role = new
                             {
                                 role.RoleId,
