@@ -78,7 +78,7 @@ public class QuantitySheetController : ControllerBase
                         ExamTime = sheet.ExamTime,
                         ProcessId = new List<int>(), // Start with an empty list for the new catch
                         StopCatch = 0,
-
+                      
                     };
                     adjustedSheets.Add(newSheet);
                 }
@@ -514,6 +514,7 @@ public class QuantitySheetController : ControllerBase
                         ExamTime = sheet.ExamTime,
                         ProcessId = new List<int>(), // Empty list for new catch
                         StopCatch = 0,
+                        Pages = sheet.Pages,
                     };
                     adjustedSheets.Add(newSheet);
                 }
@@ -559,6 +560,7 @@ public class QuantitySheetController : ControllerBase
                 existingSheet.ExamTime = newSheet.ExamTime;
                 existingSheet.ProcessId = newSheet.ProcessId;
                 existingSheet.StopCatch = newSheet.StopCatch;
+                existingSheet.Pages = newSheet.Pages;
             }
             else
             {

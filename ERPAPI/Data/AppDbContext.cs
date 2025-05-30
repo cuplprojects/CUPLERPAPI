@@ -40,10 +40,7 @@ namespace ERPAPI.Data
         public DbSet<Dispatch> Dispatch { get; set; }
 
 
-        public DbSet<Display> Displays { get; set; }
-        public DbSet<Notification> Notifications { get; set; }
-        public DbSet<UserDisplay> UserDisplays { get; set; }
-
+      
 
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
         {
