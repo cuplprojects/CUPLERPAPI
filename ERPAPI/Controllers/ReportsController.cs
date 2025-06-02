@@ -821,45 +821,182 @@ namespace ERPAPI.Controllers
         }
 
         [HttpGet("quickCompletion")]
-        public async Task<IActionResult> GetQuickCompletion([FromQuery] string date)
+        public async Task<IActionResult> GetQuickCompletion(
+[FromQuery] string? date,
+[FromQuery] string? startDate,
+[FromQuery] string? endDate,
+[FromQuery] int page = 1,
+[FromQuery] int pageSize = 10)
         {
-            if (!DateTime.TryParseExact(date, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate))
-            {
-                return BadRequest("Invalid date format. Use dd-MM-yyyy");
-            }
+            DateTime startDateTime, endDateTime;
 
-            var startDate = parsedDate.Date;
-            var endDate = startDate.AddDays(1);
+            if (!string.IsNullOrEmpty(date))
+            {
+                if (!DateTime.TryParseExact(date, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out startDateTime))
+                {
+                    return BadRequest("Invalid 'date' format. Use dd-MM-yyyy.");
+                }
+                endDateTime = startDateTime.AddDays(1);
+            }
+            else if (!string.IsNullOrEmpty(startDate) && !string.IsNullOrEmpty(endDate))
+            {
+                if (!DateTime.TryParseExact(startDate, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out startDateTime))
+                    return BadRequest("Invalid 'startDate' format. Use dd-MM-yyyy.");
+
+                if (!DateTime.TryParseExact(endDate, "dd-MM-yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out endDateTime))
+                    return BadRequest("Invalid 'endDate' format. Use dd-MM-yyyy.");
+
+                endDateTime = endDateTime.AddDays(1); // Make endDate inclusive
+            }
+            else
+            {
+                return BadRequest("Please provide either 'date' or both 'startDate' and 'endDate'.");
+            }
 
             var logs = await _context.EventLogs
                 .Where(e => e.Event == "Status updated"
-                            && e.LoggedAT >= startDate
-                            && e.LoggedAT < endDate)
+                            && e.LoggedAT >= startDateTime
+                            && e.LoggedAT < endDateTime)
                 .ToListAsync();
 
-            var result = (from a in logs
-                          from b in logs
-                          where a.TransactionId == b.TransactionId
-                                && a.EventID != b.EventID
-                                && Math.Abs((a.LoggedAT - b.LoggedAT).TotalMinutes) < 5
-                          orderby a.TransactionId, a.LoggedAT
-                          select new
-                          {
-                              EventID_A = a.EventID,
-                              EventID_B = b.EventID,
-                              Event_A = a.Event,
-                              Event_B = b.Event,
-                              a.TransactionId,
-                              LoggedAT_A = a.LoggedAT,
-                              LoggedAT_B = b.LoggedAT,
-                              TriggeredBy_A = a.EventTriggeredBy,
-                              TriggeredBy_B = b.EventTriggeredBy,
-                              TimeDifferenceMinutes = (int)Math.Abs((a.LoggedAT - b.LoggedAT).TotalMinutes)
-                          }).ToList();
+            var transactionIds = logs.Select(e => e.TransactionId).Distinct().ToList();
 
-            return Ok(result);
+            var transactions = await _context.Transaction
+                .Where(t => transactionIds.Contains(t.TransactionId))
+                .ToListAsync();
+
+            var quantitySheetIds = transactions.Select(t => t.QuantitysheetId).Distinct().ToList();
+
+            var quantitySheets = await _context.QuantitySheets
+                .Where(qs => quantitySheetIds.Contains(qs.QuantitySheetId))
+                .ToListAsync();
+
+            var projectIds = transactions.Select(t => t.ProjectId).Distinct().ToList();
+            var projects = await _context.Projects
+                .Where(p => projectIds.Contains(p.ProjectId))
+                .ToListAsync();
+
+            var enrichedLogs = (from log in logs
+                                join txn in transactions on log.TransactionId equals txn.TransactionId into txnJoin
+                                from txn in txnJoin.DefaultIfEmpty()
+                                join qs in quantitySheets on txn?.QuantitysheetId equals qs.QuantitySheetId into qsJoin
+                                from qs in qsJoin.DefaultIfEmpty()
+                                join proj in projects on txn?.ProjectId equals proj.ProjectId into projJoin
+                                from proj in projJoin.DefaultIfEmpty()
+                                select new
+                                {
+                                    Log = log,
+                                    TransactionId = txn?.TransactionId,
+                                    QuantitySheetId = txn?.QuantitysheetId,
+                                    ProjectId = txn?.ProjectId,
+                                    GroupId = proj?.GroupId,
+                                    CatchNo = qs?.CatchNo,
+                                    Quantity = qs?.Quantity
+                                }).ToList();
+
+            var matchedLogs = (from a in enrichedLogs
+                               from b in enrichedLogs
+                               where a.Log.TransactionId == b.Log.TransactionId
+                                     && a.Log.EventID != b.Log.EventID
+                                     && Math.Abs((a.Log.LoggedAT - b.Log.LoggedAT).TotalMinutes) < 5
+                               orderby a.Log.TransactionId, a.Log.LoggedAT
+                               select new
+                               {
+                                   EventID_A = a.Log.EventID,
+                                   EventID_B = b.Log.EventID,
+                                   Event_A = a.Log.Event,
+                                   Event_B = b.Log.Event,
+                                   a.TransactionId,
+                                   a.ProjectId,
+                                   a.GroupId,
+                                   a.QuantitySheetId,
+                                   a.CatchNo,
+                                   a.Quantity,
+                                   LoggedAT_A = a.Log.LoggedAT,
+                                   LoggedAT_B = b.Log.LoggedAT,
+                                   TriggeredBy_A = a.Log.EventTriggeredBy,
+                                   TriggeredBy_B = b.Log.EventTriggeredBy,
+                                   TimeDifferenceMinutes = (int)Math.Abs((a.Log.LoggedAT - b.Log.LoggedAT).TotalMinutes)
+                               }).ToList();
+
+            var totalItems = matchedLogs.Count;
+            var paginatedResult = matchedLogs
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return Ok(new
+            {
+                StartDate = startDateTime.ToString("dd-MM-yyyy"),
+                EndDate = endDateTime.AddDays(-1).ToString("dd-MM-yyyy"),
+                Page = page,
+                PageSize = pageSize,
+                TotalItems = totalItems,
+                TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize),
+                Items = paginatedResult
+            });
         }
 
+
+        [HttpGet("UnderProduction")]
+        public async Task<IActionResult> GetUnderProduction()
+        {
+            // Step 1: Fetch all required data from the database
+            var getProject = await _context.Projects
+                .Select(p => new { p.ProjectId, p.Name, p.GroupId, p.TypeId })
+                .ToListAsync();
+
+            var getdistinctlotsofproject = await _context.QuantitySheets
+                .Where(q => q.Status == 1)
+                .Select(q => new { q.LotNo, q.ProjectId, q.ExamDate, q.QuantitySheetId, q.Quantity })
+                .Distinct()
+                .ToListAsync();
+
+
+
+            var getdispatchedlots = await _context.Dispatch
+                .Select(d => new { d.LotNo, d.ProjectId })
+                .ToListAsync();
+            var dispatchedLotKeys = new HashSet<string>(
+                getdispatchedlots.Select(d => $"{d.ProjectId}|{d.LotNo}")
+            );
+
+            var quantitySheetGroups = getdistinctlotsofproject
+                .GroupBy(q => new { q.LotNo, q.ProjectId })
+                .ToDictionary(
+                    g => $"{g.Key.ProjectId}|{g.Key.LotNo}",
+                    g => new {
+                        TotalCatchNo = g.Select(q => q.QuantitySheetId).Count(),
+                        TotalQuantity = g.Sum(q => q.Quantity),
+                        FromDate = g.Min(q => DateTime.TryParse(q.ExamDate, out var d) ? d : DateTime.MinValue),
+                        ToDate = g.Max(q => DateTime.TryParse(q.ExamDate, out var d) ? d : DateTime.MinValue)
+                    }
+                      );
+
+
+
+            // Step 3: Perform joins and calculate result in-memory
+            var underProduction = (from project in getProject
+                                   from kvp in quantitySheetGroups
+                                   let keyParts = kvp.Key.Split(new[] { '|' }, StringSplitOptions.None)
+                                   let projectId = int.Parse(keyParts[0])
+                                   let lotNo = keyParts[1]
+                                   where project.ProjectId == projectId && !dispatchedLotKeys.Contains(kvp.Key)
+                                   select new
+                                   {
+                                       project.ProjectId,
+                                       project.Name,
+                                       project.GroupId,
+                                       FromDate = kvp.Value.FromDate,
+                                       ToDate = kvp.Value.ToDate,
+                                       project.TypeId,
+                                       LotNo = lotNo,
+                                       TotalCatchNo = kvp.Value.TotalCatchNo,
+                                       TotalQuantity = kvp.Value.TotalQuantity
+                                   }).ToList();
+
+            return Ok(underProduction);
+        }
 
 
 
