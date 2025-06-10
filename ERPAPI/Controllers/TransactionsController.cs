@@ -704,7 +704,7 @@ namespace ERPAPI.Controllers
                 if (page == 1)
                 {
                     projectIds.Add(starredProjectId.Value);
-                    pageSize--; // Reduce page size by 1 to accommodate starred project
+                    //pageSize--; // Reduce page size by 1 to accommodate starred project
                 }
 
                 // Remove starred project from the list to avoid duplicates
